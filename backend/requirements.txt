@@ -6,4 +6,6 @@ sqlalchemy==2.0.36
 redis==5.2.1
 pydantic==2.10.3
 python-multipart==0.0.20
-httpx==0.28.1 
+httpx==0.28.1
+psycopg2-binary==2.9.10
+alembic==1.14.0 
