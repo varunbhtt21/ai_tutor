@@ -172,4 +172,4 @@ temp/
 *.tmp
 
 # UV specific
-.venv/ 
+.venv/ .exec
