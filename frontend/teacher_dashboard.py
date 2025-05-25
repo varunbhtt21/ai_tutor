@@ -57,6 +57,9 @@ st.markdown("""
         border-radius: 4px;
         font-family: monospace;
         white-space: pre-line;
+        color: #333;
+        font-size: 14px;
+        line-height: 1.4;
     }
     .lecture-card {
         background-color: #e3f2fd;
@@ -499,8 +502,7 @@ def display_content_import_page():
     if st.session_state.show_template:
         with st.expander("📋 Template Guide", expanded=True):
             st.markdown("**Required Structure:**")
-            st.markdown('<div class="template-box">' + get_template_example() + '</div>', 
-                       unsafe_allow_html=True)
+            st.code(get_template_example(), language="markdown")
             
             st.markdown("**Rules:**")
             st.markdown("""
