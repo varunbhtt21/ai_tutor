@@ -52,6 +52,7 @@ class AITutorService:
             .filter(StudentProgress.status != ProgressStatus.COMPLETED)
             .join(Topic)
             .filter(Topic.lecture_id == lecture.id)
+            .outerjoin(SubTopic)
             .order_by(Topic.order_index, SubTopic.order_index)
             .first()
         )
@@ -96,7 +97,7 @@ class AITutorService:
         student = self.get_or_create_student(student_id, language=language)
         context = self.get_current_learning_context(student)
         
-        if context["status"] == "no_lecture_assigned":
+        if context.get("status") == "no_lecture_assigned":
             return {
                 "type": "error",
                 "message": "No curriculum available. Please contact your instructor."
@@ -152,9 +153,21 @@ class AITutorService:
         student = self.get_or_create_student(student_id, language=language)
         context = self.get_current_learning_context(student)
         
+        if context.get("status") == "no_lecture_assigned":
+            return {
+                "type": "error",
+                "message": "No curriculum available. Please contact your instructor."
+            }
+        
         subtopic = context["subtopic"]
         topic = context["topic"]
         progress = context["progress"]
+        
+        if not subtopic or not topic:
+            return {
+                "type": "error",
+                "message": "Learning context incomplete. Please restart your session."
+            }
         
         # Save student message
         self._save_conversation_message(

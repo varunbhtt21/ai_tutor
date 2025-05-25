@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from database import get_db, create_tables
 from ai_tutor_service import AITutorService
 from curriculum_seed import seed_database
+from teacher_service import TeacherCurriculumService
 
 # Load environment variables
 load_dotenv()
@@ -31,7 +32,7 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8501"],  # Streamlit frontend
+    allow_origins=["http://localhost:8501", "http://localhost:8502"],  # Student frontend + Teacher dashboard
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -75,6 +76,61 @@ class ChatResponse(BaseModel):
     response: str
     topic: str
     understanding_level: Optional[str] = None
+
+# Teacher Dashboard Models
+class LectureCreate(BaseModel):
+    title: str
+    description: str
+    order_index: int
+
+class LectureUpdate(BaseModel):
+    title: str
+    description: str
+    order_index: int
+    is_active: bool
+
+class TopicCreate(BaseModel):
+    lecture_id: int
+    title: str
+    description: str
+    order_index: int
+    learning_objectives: List[str]
+    estimated_duration_minutes: int = 30
+
+class TopicUpdate(BaseModel):
+    title: str
+    description: str
+    order_index: int
+    learning_objectives: List[str]
+    estimated_duration_minutes: int
+
+class SubTopicCreate(BaseModel):
+    topic_id: int
+    title: str
+    content: str
+    order_index: int
+    examples: List[dict] = []
+    exercises: List[dict] = []
+    introduction_prompt: Optional[str] = None
+    explanation_prompt: Optional[str] = None
+    assessment_prompt: Optional[str] = None
+
+class SubTopicUpdate(BaseModel):
+    title: str
+    content: str
+    order_index: int
+    examples: List[dict] = []
+    exercises: List[dict] = []
+    introduction_prompt: Optional[str] = None
+    explanation_prompt: Optional[str] = None
+    assessment_prompt: Optional[str] = None
+
+class ReorderRequest(BaseModel):
+    items: List[dict]  # [{"id": 1, "order_index": 1}, ...]
+
+class DuplicateLectureRequest(BaseModel):
+    source_lecture_id: int
+    new_title: str
 
 @app.on_event("startup")
 async def startup_event():
@@ -203,6 +259,334 @@ async def get_curriculum_structure(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error fetching curriculum: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+# Teacher Dashboard Endpoints
+
+@app.get("/teacher/curriculum")
+async def get_full_curriculum(db: Session = Depends(get_db)):
+    """Get complete curriculum structure for teacher dashboard"""
+    try:
+        teacher_service = TeacherCurriculumService(db)
+        curriculum = teacher_service.get_full_curriculum_structure()
+        return curriculum
+    except Exception as e:
+        logger.error(f"Error fetching curriculum structure: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.get("/teacher/analytics")
+async def get_curriculum_analytics(db: Session = Depends(get_db)):
+    """Get curriculum usage analytics"""
+    try:
+        teacher_service = TeacherCurriculumService(db)
+        analytics = teacher_service.get_curriculum_analytics()
+        return analytics
+    except Exception as e:
+        logger.error(f"Error fetching analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+# LECTURE MANAGEMENT
+@app.post("/teacher/lectures")
+async def create_lecture(request: LectureCreate, db: Session = Depends(get_db)):
+    """Create a new lecture"""
+    try:
+        teacher_service = TeacherCurriculumService(db)
+        lecture = teacher_service.create_lecture(
+            title=request.title,
+            description=request.description,
+            order_index=request.order_index
+        )
+        
+        return {
+            "id": lecture.id,
+            "title": lecture.title,
+            "description": lecture.description,
+            "order_index": lecture.order_index,
+            "is_active": lecture.is_active,
+            "message": "Lecture created successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error creating lecture: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.put("/teacher/lectures/{lecture_id}")
+async def update_lecture(lecture_id: int, request: LectureUpdate, db: Session = Depends(get_db)):
+    """Update lecture details"""
+    try:
+        teacher_service = TeacherCurriculumService(db)
+        lecture = teacher_service.update_lecture(
+            lecture_id=lecture_id,
+            title=request.title,
+            description=request.description,
+            order_index=request.order_index,
+            is_active=request.is_active
+        )
+        
+        if not lecture:
+            raise HTTPException(status_code=404, detail="Lecture not found")
+        
+        return {
+            "id": lecture.id,
+            "title": lecture.title,
+            "description": lecture.description,
+            "order_index": lecture.order_index,
+            "is_active": lecture.is_active,
+            "message": "Lecture updated successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating lecture: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.delete("/teacher/lectures/{lecture_id}")
+async def delete_lecture(lecture_id: int, db: Session = Depends(get_db)):
+    """Delete lecture and all related content"""
+    try:
+        teacher_service = TeacherCurriculumService(db)
+        success = teacher_service.delete_lecture(lecture_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Lecture not found")
+        
+        return {"message": "Lecture deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting lecture: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.post("/teacher/lectures/reorder")
+async def reorder_lectures(request: ReorderRequest, db: Session = Depends(get_db)):
+    """Reorder lectures"""
+    try:
+        teacher_service = TeacherCurriculumService(db)
+        success = teacher_service.reorder_lectures(request.items)
+        
+        if not success:
+            raise HTTPException(status_code=400, detail="Failed to reorder lectures")
+        
+        return {"message": "Lectures reordered successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error reordering lectures: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.post("/teacher/lectures/duplicate")
+async def duplicate_lecture(request: DuplicateLectureRequest, db: Session = Depends(get_db)):
+    """Duplicate an entire lecture with all content"""
+    try:
+        teacher_service = TeacherCurriculumService(db)
+        new_lecture = teacher_service.duplicate_curriculum_structure(
+            source_lecture_id=request.source_lecture_id,
+            new_title=request.new_title
+        )
+        
+        if not new_lecture:
+            raise HTTPException(status_code=404, detail="Source lecture not found")
+        
+        return {
+            "id": new_lecture.id,
+            "title": new_lecture.title,
+            "message": "Lecture duplicated successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error duplicating lecture: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+# TOPIC MANAGEMENT
+@app.post("/teacher/topics")
+async def create_topic(request: TopicCreate, db: Session = Depends(get_db)):
+    """Create a new topic"""
+    try:
+        teacher_service = TeacherCurriculumService(db)
+        topic = teacher_service.create_topic(
+            lecture_id=request.lecture_id,
+            title=request.title,
+            description=request.description,
+            order_index=request.order_index,
+            learning_objectives=request.learning_objectives,
+            estimated_duration_minutes=request.estimated_duration_minutes
+        )
+        
+        if not topic:
+            raise HTTPException(status_code=404, detail="Lecture not found")
+        
+        return {
+            "id": topic.id,
+            "title": topic.title,
+            "description": topic.description,
+            "message": "Topic created successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating topic: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.put("/teacher/topics/{topic_id}")
+async def update_topic(topic_id: int, request: TopicUpdate, db: Session = Depends(get_db)):
+    """Update topic details"""
+    try:
+        teacher_service = TeacherCurriculumService(db)
+        topic = teacher_service.update_topic(
+            topic_id=topic_id,
+            title=request.title,
+            description=request.description,
+            order_index=request.order_index,
+            learning_objectives=request.learning_objectives,
+            estimated_duration_minutes=request.estimated_duration_minutes
+        )
+        
+        if not topic:
+            raise HTTPException(status_code=404, detail="Topic not found")
+        
+        return {
+            "id": topic.id,
+            "title": topic.title,
+            "description": topic.description,
+            "message": "Topic updated successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating topic: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.delete("/teacher/topics/{topic_id}")
+async def delete_topic(topic_id: int, db: Session = Depends(get_db)):
+    """Delete topic and all related content"""
+    try:
+        teacher_service = TeacherCurriculumService(db)
+        success = teacher_service.delete_topic(topic_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Topic not found")
+        
+        return {"message": "Topic deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting topic: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.post("/teacher/topics/reorder")
+async def reorder_topics(request: ReorderRequest, db: Session = Depends(get_db)):
+    """Reorder topics within a lecture"""
+    try:
+        teacher_service = TeacherCurriculumService(db)
+        success = teacher_service.reorder_topics(request.items)
+        
+        if not success:
+            raise HTTPException(status_code=400, detail="Failed to reorder topics")
+        
+        return {"message": "Topics reordered successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error reordering topics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+# SUBTOPIC MANAGEMENT
+@app.post("/teacher/subtopics")
+async def create_subtopic(request: SubTopicCreate, db: Session = Depends(get_db)):
+    """Create a new subtopic"""
+    try:
+        teacher_service = TeacherCurriculumService(db)
+        subtopic = teacher_service.create_subtopic(
+            topic_id=request.topic_id,
+            title=request.title,
+            content=request.content,
+            order_index=request.order_index,
+            examples=request.examples,
+            exercises=request.exercises,
+            introduction_prompt=request.introduction_prompt,
+            explanation_prompt=request.explanation_prompt,
+            assessment_prompt=request.assessment_prompt
+        )
+        
+        if not subtopic:
+            raise HTTPException(status_code=404, detail="Topic not found")
+        
+        return {
+            "id": subtopic.id,
+            "title": subtopic.title,
+            "content": subtopic.content,
+            "message": "Subtopic created successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating subtopic: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.put("/teacher/subtopics/{subtopic_id}")
+async def update_subtopic(subtopic_id: int, request: SubTopicUpdate, db: Session = Depends(get_db)):
+    """Update subtopic details"""
+    try:
+        teacher_service = TeacherCurriculumService(db)
+        subtopic = teacher_service.update_subtopic(
+            subtopic_id=subtopic_id,
+            title=request.title,
+            content=request.content,
+            order_index=request.order_index,
+            examples=request.examples,
+            exercises=request.exercises,
+            introduction_prompt=request.introduction_prompt,
+            explanation_prompt=request.explanation_prompt,
+            assessment_prompt=request.assessment_prompt
+        )
+        
+        if not subtopic:
+            raise HTTPException(status_code=404, detail="Subtopic not found")
+        
+        return {
+            "id": subtopic.id,
+            "title": subtopic.title,
+            "content": subtopic.content,
+            "message": "Subtopic updated successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating subtopic: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.delete("/teacher/subtopics/{subtopic_id}")
+async def delete_subtopic(subtopic_id: int, db: Session = Depends(get_db)):
+    """Delete subtopic"""
+    try:
+        teacher_service = TeacherCurriculumService(db)
+        success = teacher_service.delete_subtopic(subtopic_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Subtopic not found")
+        
+        return {"message": "Subtopic deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting subtopic: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.post("/teacher/subtopics/reorder")
+async def reorder_subtopics(request: ReorderRequest, db: Session = Depends(get_db)):
+    """Reorder subtopics within a topic"""
+    try:
+        teacher_service = TeacherCurriculumService(db)
+        success = teacher_service.reorder_subtopics(request.items)
+        
+        if not success:
+            raise HTTPException(status_code=400, detail="Failed to reorder subtopics")
+        
+        return {"message": "Subtopics reordered successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error reordering subtopics: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 # Legacy P0 Endpoints (for backward compatibility)
