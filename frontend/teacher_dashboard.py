@@ -592,6 +592,27 @@ def display_content_import_page():
         if parsed["description"]:
             st.markdown(f"**Description:** {parsed['description']}")
         
+        # Show overall content structure preview
+        st.markdown("**📄 Content Structure Preview:**")
+        structure_preview = f"### Lecture Title : {parsed['title']}\n"
+        if parsed["description"]:
+            structure_preview += f"### Description : {parsed['description']}\n"
+        structure_preview += "\n"
+        
+        for subtopic in parsed["subtopics"][:3]:  # Show first 3 subtopics
+            structure_preview += f"# ${subtopic['order_index']}\n"
+            structure_preview += f"## {subtopic['title']}\n"
+            # Add first line of content
+            first_line = subtopic['content'].split('\n')[0] if subtopic['content'] else ""
+            if first_line:
+                structure_preview += f"{first_line[:80]}...\n"
+            structure_preview += "\n"
+        
+        if len(parsed["subtopics"]) > 3:
+            structure_preview += f"... and {len(parsed['subtopics']) - 3} more subtopics"
+        
+        st.code(structure_preview, language="markdown")
+        
         # Detailed subtopics preview
         st.markdown("**📚 Subtopics Structure:**")
         
@@ -604,7 +625,7 @@ def display_content_import_page():
                 preview_text = '\n'.join(content_lines)
                 if len(subtopic['content'].split('\n')) > 5:
                     preview_text += "\n... (content continues)"
-                st.text(preview_text)
+                st.code(preview_text, language="markdown")
                 
                 # Code examples
                 if subtopic["examples"]:
@@ -620,8 +641,8 @@ def display_content_import_page():
                 # Inquiry prompts
                 if subtopic["inquiry_prompts"]:
                     st.markdown(f"**❓ Inquiry Prompts ({len(subtopic['inquiry_prompts'])}):**")
-                    for prompt in subtopic["inquiry_prompts"][:2]:  # Show first 2 prompts
-                        st.markdown(f'> "{prompt}"')
+                    for i, prompt in enumerate(subtopic["inquiry_prompts"][:2], 1):  # Show first 2 prompts
+                        st.code(f'"{prompt}"', language="text")
                     
                     if len(subtopic["inquiry_prompts"]) > 2:
                         st.caption(f"... and {len(subtopic['inquiry_prompts']) - 2} more prompts")
