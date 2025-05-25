@@ -762,6 +762,444 @@ def display_curriculum_overview_page():
         st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("---")
 
+def display_preview_test_page():
+    """Display the preview & test curriculum page"""
+    st.subheader("🧪 Preview & Test Curriculum")
+    st.markdown("Test how AI teaches your curriculum with interactive topic progression and assessments.")
+    
+    # Initialize session state for preview testing
+    if 'test_session_active' not in st.session_state:
+        st.session_state.test_session_active = False
+    if 'current_lecture_id' not in st.session_state:
+        st.session_state.current_lecture_id = None
+    if 'current_topic_index' not in st.session_state:
+        st.session_state.current_topic_index = 0
+    if 'current_subtopic_index' not in st.session_state:
+        st.session_state.current_subtopic_index = 0
+    if 'test_conversation' not in st.session_state:
+        st.session_state.test_conversation = []
+    if 'current_phase' not in st.session_state:
+        st.session_state.current_phase = "teaching"  # teaching, task, assessment
+    if 'task_attempts' not in st.session_state:
+        st.session_state.task_attempts = 0
+    if 'current_task' not in st.session_state:
+        st.session_state.current_task = None
+    
+    # Fetch curriculum for testing
+    curriculum = fetch_curriculum_overview()
+    if not curriculum or not curriculum.get("lectures"):
+        st.warning("No curriculum found. Please import some lectures first using the Content Import page.")
+        return
+    
+    lectures = curriculum.get("lectures", [])
+    
+    # Lecture selection
+    if not st.session_state.test_session_active:
+        st.markdown("### 📚 Select Lecture to Test")
+        
+        lecture_options = {f"{lecture['title']} ({len(lecture.get('topics', []))} topics)": lecture['id'] 
+                          for lecture in lectures}
+        
+        selected_lecture_key = st.selectbox(
+            "Choose a lecture to test:",
+            options=list(lecture_options.keys()),
+            key="lecture_selector"
+        )
+        
+        if selected_lecture_key:
+            selected_lecture_id = lecture_options[selected_lecture_key]
+            selected_lecture = next(l for l in lectures if l['id'] == selected_lecture_id)
+            
+            # Show lecture overview
+            st.markdown("**📋 Lecture Overview:**")
+            st.markdown(f"**Title:** {selected_lecture['title']}")
+            if selected_lecture.get('description'):
+                st.markdown(f"**Description:** {selected_lecture['description']}")
+            
+            topics = selected_lecture.get('topics', [])
+            if topics:
+                st.markdown(f"**Topics ({len(topics)}):**")
+                for i, topic in enumerate(topics, 1):
+                    subtopics = topic.get('subtopics', [])
+                    st.markdown(f"{i}. **{topic['title']}** - {len(subtopics)} subtopics")
+            
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                if st.button("🚀 Start AI Teaching Session", type="primary"):
+                    st.session_state.test_session_active = True
+                    st.session_state.current_lecture_id = selected_lecture_id
+                    st.session_state.current_topic_index = 0
+                    st.session_state.current_subtopic_index = 0
+                    st.session_state.test_conversation = []
+                    st.session_state.current_phase = "teaching"
+                    st.session_state.task_attempts = 0
+                    st.rerun()
+            
+            with col2:
+                st.info("💡 The AI will teach each topic, give tasks, and assess understanding before moving forward.")
+    
+    else:
+        # Active teaching session
+        display_active_teaching_session(lectures)
+
+def display_active_teaching_session(lectures):
+    """Display the active AI teaching session"""
+    
+    # Get current lecture and topic
+    current_lecture = next(l for l in lectures if l['id'] == st.session_state.current_lecture_id)
+    topics = current_lecture.get('topics', [])
+    
+    if st.session_state.current_topic_index >= len(topics):
+        # Course completed
+        st.success("🎉 Congratulations! You've completed the entire lecture!")
+        st.balloons()
+        
+        if st.button("🔄 Start Over"):
+            st.session_state.test_session_active = False
+            st.rerun()
+        return
+    
+    current_topic = topics[st.session_state.current_topic_index]
+    subtopics = current_topic.get('subtopics', [])
+    
+    if st.session_state.current_subtopic_index >= len(subtopics):
+        # Topic completed, move to next topic
+        st.session_state.current_topic_index += 1
+        st.session_state.current_subtopic_index = 0
+        st.session_state.current_phase = "teaching"
+        st.session_state.task_attempts = 0
+        st.rerun()
+    
+    current_subtopic = subtopics[st.session_state.current_subtopic_index]
+    
+    # Progress indicator
+    total_subtopics = sum(len(topic.get('subtopics', [])) for topic in topics)
+    completed_subtopics = sum(len(topics[i].get('subtopics', [])) for i in range(st.session_state.current_topic_index))
+    completed_subtopics += st.session_state.current_subtopic_index
+    
+    progress = completed_subtopics / total_subtopics if total_subtopics > 0 else 0
+    
+    st.markdown("### 📊 Progress")
+    st.progress(progress)
+    st.caption(f"Topic {st.session_state.current_topic_index + 1}/{len(topics)}: {current_topic['title']} | "
+              f"Subtopic {st.session_state.current_subtopic_index + 1}/{len(subtopics)}: {current_subtopic['title']}")
+    
+    # Session controls
+    col1, col2, col3 = st.columns([1, 1, 2])
+    with col1:
+        if st.button("⏹️ End Session"):
+            st.session_state.test_session_active = False
+            st.rerun()
+    
+    with col2:
+        if st.button("⏭️ Skip Topic"):
+            st.session_state.current_subtopic_index += 1
+            st.session_state.current_phase = "teaching"
+            st.session_state.task_attempts = 0
+            st.rerun()
+    
+    # Chat interface
+    st.markdown("---")
+    st.markdown("### 🤖 AI Teacher Chat")
+    
+    # Display conversation
+    chat_container = st.container()
+    with chat_container:
+        for message in st.session_state.test_conversation:
+            if message["role"] == "ai":
+                with st.chat_message("assistant", avatar="🤖"):
+                    st.markdown(message["content"])
+            else:
+                with st.chat_message("user", avatar="👨‍🎓"):
+                    st.markdown(message["content"])
+    
+    # Handle different phases
+    if st.session_state.current_phase == "teaching":
+        handle_teaching_phase(current_subtopic)
+    elif st.session_state.current_phase == "task":
+        handle_task_phase(current_subtopic)
+    elif st.session_state.current_phase == "assessment":
+        handle_assessment_phase(current_subtopic)
+
+def handle_teaching_phase(current_subtopic):
+    """Handle the teaching phase where AI explains the topic"""
+    
+    if not st.session_state.test_conversation or st.session_state.test_conversation[-1]["role"] != "ai":
+        # Generate AI teaching content
+        teaching_content = generate_ai_teaching_content(current_subtopic)
+        st.session_state.test_conversation.append({
+            "role": "ai",
+            "content": teaching_content
+        })
+        st.rerun()
+    
+    # Student input
+    student_input = st.chat_input("Ask questions or type 'ready' when you understand the topic...")
+    
+    if student_input:
+        st.session_state.test_conversation.append({
+            "role": "student",
+            "content": student_input
+        })
+        
+        if student_input.lower().strip() in ['ready', 'understood', 'got it', 'clear', 'next']:
+            # Move to task phase
+            st.session_state.current_phase = "task"
+            st.session_state.task_attempts = 0
+        else:
+            # Generate AI response to student question
+            ai_response = generate_ai_response_to_question(current_subtopic, student_input)
+            st.session_state.test_conversation.append({
+                "role": "ai",
+                "content": ai_response
+            })
+        
+        st.rerun()
+
+def handle_task_phase(current_subtopic):
+    """Handle the task phase where AI gives a coding or MCQ task"""
+    
+    if st.session_state.current_task is None:
+        # Generate new task
+        st.session_state.current_task = generate_task_for_subtopic(current_subtopic)
+        
+        task_content = f"""
+🎯 **Time for a Task!**
+
+{st.session_state.current_task['content']}
+
+**Instructions:** {st.session_state.current_task['instructions']}
+"""
+        
+        st.session_state.test_conversation.append({
+            "role": "ai",
+            "content": task_content
+        })
+        st.rerun()
+    
+    # Student task submission
+    if st.session_state.current_task['type'] == 'coding':
+        st.markdown("**💻 Submit your code:**")
+        student_code = st.text_area("Your solution:", height=150, key=f"code_task_{st.session_state.task_attempts}")
+        
+        if st.button("Submit Code", type="primary"):
+            if student_code.strip():
+                st.session_state.test_conversation.append({
+                    "role": "student",
+                    "content": f"```python\n{student_code}\n```"
+                })
+                st.session_state.current_phase = "assessment"
+                st.rerun()
+            else:
+                st.error("Please write some code before submitting.")
+    
+    elif st.session_state.current_task['type'] == 'mcq':
+        st.markdown("**📝 Choose the correct answer:**")
+        
+        selected_option = st.radio(
+            "Options:",
+            options=st.session_state.current_task['options'],
+            key=f"mcq_task_{st.session_state.task_attempts}"
+        )
+        
+        if st.button("Submit Answer", type="primary"):
+            st.session_state.test_conversation.append({
+                "role": "student",
+                "content": f"My answer: {selected_option}"
+            })
+            st.session_state.current_phase = "assessment"
+            st.rerun()
+
+def handle_assessment_phase(current_subtopic):
+    """Handle the assessment phase where AI evaluates and gives feedback"""
+    
+    # Get student's last response
+    student_response = st.session_state.test_conversation[-1]["content"]
+    
+    # Generate assessment
+    assessment = assess_student_response(current_subtopic, st.session_state.current_task, student_response)
+    
+    # Create feedback message
+    flag_emoji = {"red": "🔴", "yellow": "🟡", "green": "🟢"}
+    feedback_content = f"""
+{flag_emoji[assessment['flag']]} **Assessment: {assessment['flag'].upper()} FLAG**
+
+**Feedback:** {assessment['feedback']}
+
+{assessment['next_action']}
+"""
+    
+    st.session_state.test_conversation.append({
+        "role": "ai",
+        "content": feedback_content
+    })
+    
+    # Handle next steps based on assessment
+    if assessment['flag'] == 'green':
+        # Move to next subtopic
+        st.session_state.current_subtopic_index += 1
+        st.session_state.current_phase = "teaching"
+        st.session_state.task_attempts = 0
+        st.session_state.current_task = None
+    
+    elif assessment['flag'] == 'yellow':
+        # Ask if student wants to retry
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔄 Try New Task"):
+                st.session_state.current_phase = "task"
+                st.session_state.task_attempts += 1
+                st.session_state.current_task = None
+                st.rerun()
+        
+        with col2:
+            if st.button("➡️ Move to Next Topic"):
+                st.session_state.current_subtopic_index += 1
+                st.session_state.current_phase = "teaching"
+                st.session_state.task_attempts = 0
+                st.session_state.current_task = None
+                st.rerun()
+    
+    elif assessment['flag'] == 'red':
+        # Re-teach with more examples
+        if st.button("📚 Learn Again with Examples"):
+            st.session_state.current_phase = "teaching"
+            st.session_state.task_attempts += 1
+            st.session_state.current_task = None
+            # Add flag to use more examples in re-teaching
+            st.session_state.reteach_with_examples = True
+            st.rerun()
+
+def generate_ai_teaching_content(subtopic):
+    """Generate AI teaching content for a subtopic"""
+    
+    use_examples = getattr(st.session_state, 'reteach_with_examples', False)
+    
+    content = f"""
+👋 **Welcome to: {subtopic['title']}**
+
+{subtopic['content'][:500]}{'...' if len(subtopic['content']) > 500 else ''}
+"""
+    
+    # Add code examples if available and needed
+    if subtopic.get('examples') and (use_examples or len(subtopic['examples']) <= 2):
+        content += "\n\n💻 **Let's look at some examples:**\n"
+        for i, example in enumerate(subtopic['examples'][:3], 1):
+            content += f"\n**Example {i}:**\n```python\n{example['code']}\n```\n{example['explanation']}\n"
+    
+    # Add inquiry prompts if available
+    if subtopic.get('inquiry_prompts'):
+        content += f"\n\n🤔 **Think about this:** {subtopic['inquiry_prompts'][0]}"
+    
+    content += "\n\n💬 **Ask me any questions about this topic, or type 'ready' when you understand!**"
+    
+    # Reset the reteach flag
+    if hasattr(st.session_state, 'reteach_with_examples'):
+        delattr(st.session_state, 'reteach_with_examples')
+    
+    return content
+
+def generate_ai_response_to_question(subtopic, question):
+    """Generate AI response to student question"""
+    
+    # Simple response generation (in real implementation, this would use OpenAI API)
+    responses = [
+        f"Great question! Let me explain that part of {subtopic['title']} in more detail...",
+        f"I understand your confusion about {subtopic['title']}. Here's another way to think about it...",
+        f"That's an excellent point! In the context of {subtopic['title']}, this means...",
+    ]
+    
+    import random
+    base_response = random.choice(responses)
+    
+    # Add relevant content snippet
+    if subtopic.get('examples'):
+        base_response += f"\n\nHere's a practical example:\n```python\n{subtopic['examples'][0]['code']}\n```"
+    
+    return base_response
+
+def generate_task_for_subtopic(subtopic):
+    """Generate a coding or MCQ task for a subtopic"""
+    
+    # Determine task type based on content
+    has_code = bool(subtopic.get('examples'))
+    
+    if has_code and 'python' in subtopic['content'].lower():
+        # Generate coding task
+        return {
+            'type': 'coding',
+            'content': f"Write a Python program that demonstrates {subtopic['title'].lower()}.",
+            'instructions': "Write clean, working code with comments explaining your logic.",
+            'expected_concepts': [subtopic['title'].lower()]
+        }
+    else:
+        # Generate MCQ task
+        return {
+            'type': 'mcq',
+            'content': f"Which statement about {subtopic['title']} is correct?",
+            'options': [
+                f"{subtopic['title']} is used for data processing",
+                f"{subtopic['title']} is a Python built-in function",
+                f"{subtopic['title']} helps in code organization",
+                f"{subtopic['title']} is essential for programming"
+            ],
+            'correct_answer': 0,
+            'instructions': "Choose the most accurate statement."
+        }
+
+def assess_student_response(subtopic, task, response):
+    """Assess student response and return flag with feedback"""
+    
+    # Simple assessment logic (in real implementation, this would use OpenAI API)
+    import random
+    
+    if task['type'] == 'coding':
+        # Check if code contains relevant keywords
+        code_quality = len([word for word in subtopic['title'].lower().split() if word in response.lower()])
+        has_python_syntax = 'def ' in response or 'print(' in response or '=' in response
+        
+        if code_quality >= 1 and has_python_syntax and len(response.strip()) > 50:
+            return {
+                'flag': 'green',
+                'feedback': "Excellent work! Your code demonstrates a good understanding of the concept.",
+                'next_action': "🎉 Ready to move to the next topic!"
+            }
+        elif has_python_syntax:
+            return {
+                'flag': 'yellow',
+                'feedback': "Good attempt! Your code works but could be improved or more complete.",
+                'next_action': "Would you like to try a new task or move forward?"
+            }
+        else:
+            return {
+                'flag': 'red',
+                'feedback': "I see you're having trouble with this concept. Let me explain it again with more examples.",
+                'next_action': "Don't worry, let's go through this step by step!"
+            }
+    
+    else:  # MCQ
+        # Simple random assessment for demo
+        score = random.choice(['green', 'yellow', 'red'])
+        
+        if score == 'green':
+            return {
+                'flag': 'green',
+                'feedback': "Perfect! You've got the right answer and understand the concept well.",
+                'next_action': "🎉 Let's move to the next topic!"
+            }
+        elif score == 'yellow':
+            return {
+                'flag': 'yellow',
+                'feedback': "Close! You have a partial understanding but might want to review once more.",
+                'next_action': "Would you like to try another question or continue?"
+            }
+        else:
+            return {
+                'flag': 'red',
+                'feedback': "Not quite right. Let me explain this concept again with clearer examples.",
+                'next_action': "Let's go through this together step by step!"
+            }
+
 def main():
     """Main teacher dashboard application"""
     initialize_session_state()
@@ -820,16 +1258,7 @@ More content...""")
         display_curriculum_overview_page()
     
     elif page == "🧪 Preview & Test":
-        st.subheader("🧪 Preview & Test Curriculum")
-        st.info("🚧 Preview feature coming soon! This will allow you to test how the AI teaches your curriculum.")
-        
-        st.markdown("""
-        **Planned Features:**
-        - 🤖 Chat with AI using your curriculum
-        - 📊 See how AI interprets your prompts
-        - 🎯 Test understanding detection
-        - 📝 Preview auto-generated notes
-        """)
+        display_preview_test_page()
     
     elif page == "⚙️ Settings":
         st.subheader("⚙️ Dashboard Settings")
